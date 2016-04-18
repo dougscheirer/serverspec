@@ -14,7 +14,16 @@ module Serverspec
         ask_windows_backend
       end
 
-      if @backend_type == 'ssh'
+      if @backend_type == 'saltstack'
+        print 'Auto-configure Salt from master info? y/n: '
+        auto_config = $stdin.gets.chomp
+        if auto_config =~ (/(true|t|yes|y|1)$/i)
+          auto_saltstack_configuration
+        else
+          print('Input minion instance name: ')
+          @hostname = $stdin.gets.chomp
+        end
+      elsif @backend_type == 'ssh'
         print 'Vagrant instance y/n: '
         @vagrant = $stdin.gets.chomp
         if @vagrant =~ (/(true|t|yes|y|1)$/i)
@@ -69,6 +78,7 @@ Select a backend type:
 
   1) SSH
   2) Exec (local)
+  3) SaltStack 
 
 Select number: 
 EOF
@@ -76,7 +86,7 @@ EOF
       num = $stdin.gets.to_i - 1
       puts
 
-      @backend_type = ['ssh', 'exec'][num] || 'exec'
+      @backend_type = ['ssh', 'exec', 'saltstack'][num] || 'exec'
     end
 
     def self.ask_windows_backend
@@ -245,6 +255,27 @@ end
       end
     end
 
+    def self.auto_saltstack_configuration
+       minion_list = `ls -1 /var/cache/salt/master/minions`
+        list_of_minions = []
+        if minion_list != ''
+          minion_list.each_line do |line|
+            list_of_minions << line.strip!
+          end
+          if list_of_minions.length == 1
+            @hostname = list_of_minions[0]
+          else
+            list_of_minions.each_with_index { |minion, index | puts "#{index}) #{minion}\n" }
+            print 'Choose a minion: '
+            chosen_minion = $stdin.gets.chomp
+            @hostname = list_of_minions[chosen_minion.to_i]
+          end
+        else
+          $stderr.puts 'Could not find any defined minions'
+          exit 1
+        end
+    end
+
     def self.spec_helper_template
       template = <<-'EOF'
 require 'serverspec'
@@ -259,6 +290,12 @@ require 'winrm'
 <% end -%>
 
 set :backend, :<%= @backend_type %>
+
+<% if @backend_type == 'saltstack' -%>
+  
+set :salt, { :minion => ENV['TARGET_HOST'] }
+
+<%- end -%>
 
 <% if @os_type == 'UN*X' && @backend_type == 'ssh' -%>
 if ENV['ASK_SUDO_PASSWORD']
